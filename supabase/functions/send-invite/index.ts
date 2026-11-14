@@ -46,7 +46,10 @@ Deno.serve(async (req) => {
       body: JSON.stringify({ from: Deno.env.get('INVITE_FROM'), to: to.length === 1 ? to : [Deno.env.get('INVITE_FROM')], bcc: to.length === 1 ? undefined : to, subject: `${from} made you an advent calendar`, html }),
     });
     if (!res.ok) return json({ error: 'Email service refused the message' }, 502);
-    return json({ sent: to.length });
+    // Remember who has been emailed (as the owner, so the normal database rules apply).
+    const emailed_at = new Date().toISOString();
+    await sb.from('calendar_invites').update({ emailed_at }).eq('calendar_id', calendar_id).in('email', to);
+    return json({ sent: to.length, emailed_at });
   } catch (_e) {
     return json({ error: 'Could not send invitations' }, 500);
   }

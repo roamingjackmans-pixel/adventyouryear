@@ -145,6 +145,10 @@
       async listInvites(id) {
         return check(await sb.from('calendar_invites').select('email, invited_at').eq('calendar_id', id).order('invited_at')).map((r) => r.email);
       },
+      /** [{ email, emailed_at }] in the order people were added; emailed_at is null until the invitation goes out. */
+      async listInviteStatus(id) {
+        return check(await sb.from('calendar_invites').select('email, emailed_at').eq('calendar_id', id).order('invited_at'));
+      },
       async addInvites(id, emails) {
         const rows = emails.map((e) => ({ calendar_id: id, email: e.trim().toLowerCase() }));
         check(await sb.from('calendar_invites').upsert(rows, { onConflict: 'calendar_id,email', ignoreDuplicates: true }));

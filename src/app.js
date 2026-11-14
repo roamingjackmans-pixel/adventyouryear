@@ -530,34 +530,53 @@
       ${api.mode === 'preview' ? `<p class="form-note" style="margin-top:14px">Preview mode keeps accounts in this browser only. To try the other side here: add an email, sign out, open the link, and sign up with that email.</p>` : ''}
       <div class="modal-actions">${api.mode === 'preview' ? `<button class="btn ghost small" type="button" data-act="try" style="color:#6d0f1d;border-color:#c4a86e">Open the link here</button>` : ''}<button class="btn small" type="button" data-close>Done</button></div>`);
     const list = m.querySelector('#invite-list'), err = m.querySelector('#invite-err'), input = m.querySelector('#invite-input');
-    let emails = [];
+    let people = []; // [{ email, emailed_at }]
+    const emails = () => people.map((p) => p.email);
+    const canSend = api.mode === 'preview' || (cfg.inviteEmails && api.mode === 'live');
     const showErr = (msg) => { err.textContent = msg || ''; err.hidden = !msg; };
-    const mailto = () => {
+    const mailto = (to) => {
       const subject = `${c.from_name || 'Someone'} made you an advent calendar`;
       const body = `I made you a photo advent calendar: "${c.title}". A new door opens each day from ${U.MONTHS[c.start_month - 1]} 1.\n\nOpen it here and sign up with this email address so it's saved to your account:\n${url}`;
-      return `mailto:?bcc=${encodeURIComponent(emails.join(','))}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      return `mailto:?bcc=${encodeURIComponent(to.join(','))}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    };
+    const when = (iso) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    const refresh = async () => { people = await api.listInviteStatus(c.id); render(); };
+    // Email the invitation to just these people; everyone else on the list is left alone.
+    const send = async (to, btn) => {
+      const label = btn.textContent;
+      btn.disabled = true; btn.textContent = 'Sending…'; showErr('');
+      try {
+        const r = await api.sendInvites(c.id, to, url);
+        const who = to.length === 1 ? to[0] : `${r.count} people`;
+        U.toast(r.simulated ? `Preview mode: marked as sent to ${who} (no real email goes out).` : `Invitation sent to ${who}.`);
+        await refresh();
+      } catch (e2) { showErr(e2.message); btn.disabled = false; btn.textContent = label; }
     };
     const render = () => {
-      list.innerHTML = emails.length
-        ? emails.map((e) => `<li><span>${esc(e)}</span><button class="linkish" type="button" data-remove="${esc(e)}" aria-label="Stop sharing with ${esc(e)}">Remove</button></li>`).join('')
+      list.innerHTML = people.length
+        ? people.map((p) => `<li>
+            <span class="inv-who"><span>${esc(p.email)}</span>${canSend ? `<small class="inv-status ${p.emailed_at ? '' : 'pending'}">${p.emailed_at ? 'Invitation emailed ' + esc(when(p.emailed_at)) : 'Not emailed yet'}</small>` : ''}</span>
+            <span class="inv-acts">${canSend
+              ? `<button class="linkish" type="button" data-send="${esc(p.email)}" aria-label="${p.emailed_at ? 'Send another invitation to' : 'Send the invitation to'} ${esc(p.email)}">${p.emailed_at ? 'Resend' : 'Send'}</button>`
+              : `<a class="linkish" href="${esc(mailto([p.email]))}" target="_blank" rel="noopener">Email</a>`}
+              <button class="linkish" type="button" data-remove="${esc(p.email)}" aria-label="Stop sharing with ${esc(p.email)}">Remove</button></span>
+          </li>`).join('')
         : '<li class="invite-empty">Not shared with anyone yet.</li>';
       const actions = m.querySelector('#share-actions');
-      actions.innerHTML = !emails.length ? ''
-        : cfg.inviteEmails && api.mode === 'live'
-          ? `<button class="btn small" type="button" data-act="send">Email the invitation to ${emails.length === 1 ? esc(emails[0]) : emails.length + ' people'}</button>`
-          : `<a class="btn small" href="${esc(mailto())}" target="_blank" rel="noopener">Write the email in my mail app</a>`;
-      const send = actions.querySelector('[data-act="send"]');
-      if (send) send.addEventListener('click', async () => {
-        send.disabled = true; send.textContent = 'Sending…';
-        try { const r = await api.sendInvites(c.id, emails, url); U.toast(`Invitation sent to ${r.count} ${r.count === 1 ? 'person' : 'people'}.`); send.textContent = 'Sent'; }
-        catch (e2) { showErr(e2.message); send.disabled = false; send.textContent = 'Try sending again'; }
-      });
+      const unsent = people.filter((p) => !p.emailed_at).map((p) => p.email);
+      actions.innerHTML = !people.length ? ''
+        : !canSend ? `<a class="btn small" href="${esc(mailto(emails()))}" target="_blank" rel="noopener">Write the email in my mail app</a>`
+          : unsent.length ? `<button class="btn small" type="button" data-act="send">Email the invitation to ${unsent.length === 1 ? esc(unsent[0]) : unsent.length + ' new people'}</button>`
+            : `<p class="share-note">Everyone here has been emailed. Use Resend to send someone another copy.</p>`;
+      const bulk = actions.querySelector('[data-act="send"]');
+      if (bulk) bulk.addEventListener('click', () => send(unsent, bulk));
+      list.querySelectorAll('[data-send]').forEach((b) => b.addEventListener('click', () => send([b.dataset.send], b)));
       list.querySelectorAll('[data-remove]').forEach((b) => b.addEventListener('click', async () => {
-        try { emails = await api.removeInvite(c.id, b.dataset.remove); render(); if (onChange) onChange(emails); }
+        try { await api.removeInvite(c.id, b.dataset.remove); await refresh(); if (onChange) onChange(emails()); }
         catch (e2) { showErr(e2.message); }
       }));
     };
-    api.listInvites(c.id).then((l) => { emails = l; render(); }).catch((e2) => showErr(e2.message));
+    refresh().catch((e2) => showErr(e2.message));
     m.querySelector('.invite-add').addEventListener('submit', async (e) => {
       e.preventDefault();
       const parts = input.value.split(/[\s,;]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
@@ -567,7 +586,7 @@
       const mine = api.user() && api.user().email.toLowerCase();
       if (parts.includes(mine)) return showErr('That’s your own email. You can already see this calendar from Preview.');
       showErr('');
-      try { emails = await api.addInvites(c.id, parts); input.value = ''; render(); if (onChange) onChange(emails); }
+      try { await api.addInvites(c.id, parts); input.value = ''; await refresh(); if (onChange) onChange(emails()); }
       catch (e2) { showErr(e2.message); }
     });
     input.focus();

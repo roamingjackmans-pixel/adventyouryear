@@ -38,6 +38,10 @@ try {
   if (inv.error) { try { detail = JSON.stringify(await inv.error.context.json()); } catch { detail = inv.error.message; } }
   console.log(inv.error ? `FAIL  invitation email: ${detail}` : `PASS  invitation email sent (${JSON.stringify(inv.data)})`);
   ok &&= !inv.error;
+  // 3. the send is remembered, so the sharing screen only offers to email people who haven't had one
+  const rec = (await oc.from('calendar_invites').select('emailed_at').eq('calendar_id', cal.id).eq('email', TEST).single()).data;
+  console.log(rec && rec.emailed_at ? `PASS  send recorded (${rec.emailed_at})` : 'FAIL  send was not recorded');
+  ok &&= !!(rec && rec.emailed_at);
   await oc.from('calendars').delete().eq('id', cal.id);
 } finally {
   for (const id of ids) await admin.auth.admin.deleteUser(id);

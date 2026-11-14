@@ -249,7 +249,19 @@
       await kv.del('invites', id + ':' + norm(email));
       return api.listInvites(id);
     },
-    async sendInvites() { return { sent: false }; },
+    async listInviteStatus(id) {
+      return (await kv.all('invites')).filter((i) => i.calendar_id === id).sort((a, b) => a.invited_at - b.invited_at)
+        .map((i) => ({ email: i.email, emailed_at: i.emailed_at ? new Date(i.emailed_at).toISOString() : null }));
+    },
+    /** Preview mode can't send real email; it records the send so the sharing screen behaves like the live one. */
+    async sendInvites(id, emails) {
+      let count = 0;
+      for (const e of emails) {
+        const rec = await kv.get('invites', id + ':' + norm(e));
+        if (rec) { rec.emailed_at = Date.now(); await kv.put('invites', id + ':' + rec.email, rec); count++; }
+      }
+      return { sent: true, count, simulated: true };
+    },
     async markOpened(id, day) {
       if (!current) return;
       await kv.put('opens', `${id}:${current.id}:${day}`, { calendar_id: id, user_id: current.id, day, opened_at: Date.now() });

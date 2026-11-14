@@ -191,7 +191,7 @@
         if (!row) continue;
         let image_url = null;
         if (row.blob_id) { const b = await kv.get('blobs', row.blob_id); if (b) image_url = URL.createObjectURL(b); }
-        days[d] = { caption: row.caption || '', image_url };
+        days[d] = { caption: row.caption || '', image_url, focus: [row.focus_x ?? 50, row.focus_y ?? 50] };
       }
       const opened = new Set((await kv.all('opens')).filter((o) => o.calendar_id === id && current && o.user_id === current.id).map((o) => o.day));
       return { calendar: c, role: isOwner ? 'owner' : 'recipient', days, opened };
@@ -207,9 +207,15 @@
       const row = (await kv.get('days', id + ':' + day)) || { calendar_id: id, day };
       if (row.blob_id) await kv.del('blobs', row.blob_id);
       row.blob_id = uid();
+      row.focus_x = 50; row.focus_y = 50;
       await kv.put('blobs', row.blob_id, blob);
       await kv.put('days', id + ':' + day, row);
       return URL.createObjectURL(blob);
+    },
+    async saveFocus(id, day, x, y) {
+      const row = (await kv.get('days', id + ':' + day)) || { calendar_id: id, day };
+      row.focus_x = Math.round(x); row.focus_y = Math.round(y);
+      await kv.put('days', id + ':' + day, row);
     },
     async removePhoto(id, day) {
       const row = await kv.get('days', id + ':' + day);

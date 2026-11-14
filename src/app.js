@@ -313,7 +313,7 @@
         </form>
         <div class="side-actions">
           <a class="btn gold" href="#preview-${c.id}">Preview the calendar</a>
-          <button class="btn" type="button" data-act="share">Share with family</button>
+          <button class="btn" type="button" data-act="share">Share the Calendar</button>
           <p class="shared-with" id="shared-with"></p>
           <button class="btn danger-text small" type="button" data-act="delete">Delete this calendar</button>
         </div>
@@ -368,20 +368,21 @@
         <header><b>${d}</b><span></span></header>
         <button class="day-photo" type="button" aria-label="Add a photo for day ${d}"><span class="ph-label">${ICON_PHOTO}<span>Add a photo</span></span></button>
         <input type="file" accept="image/*" hidden id="file-${d}">
-        <div class="photo-tools" hidden><button type="button" data-act="replace">Replace</button><button type="button" data-act="remove">Remove</button></div>
+        <div class="photo-tools" hidden><button type="button" data-act="focus">Adjust position</button><button type="button" data-act="replace">Replace</button><button type="button" data-act="remove">Remove</button></div>
         <label class="field" for="cap-${d}"><span class="hint" style="font-weight:600;color:var(--ink)">Note</span><textarea class="textarea" id="cap-${d}" maxlength="400" placeholder="A memory, a joke, a little message…">${esc(day.caption || '')}</textarea></label>
         <div class="day-foot"><span class="count"></span><span class="st"></span></div>
       </article>`);
       grid.appendChild(card);
       const photoBtn = card.querySelector('.day-photo'), file = card.querySelector('input[type=file]'), tools = card.querySelector('.photo-tools');
       const ta = card.querySelector('textarea'), st2 = card.querySelector('.st'), cnt = card.querySelector('.count');
-      let hasPhoto = false;
+      let hasPhoto = false, photoURL = null;
+      let focus = day.focus || [50, 50];
       const setFilled = () => { card.dataset.filled = hasPhoto || ta.value.trim() ? '1' : '0'; counts(); };
       const showPhoto = (url) => {
-        hasPhoto = !!url;
+        hasPhoto = !!url; photoURL = url || null;
         photoBtn.classList.toggle('has', hasPhoto);
         photoBtn.querySelector('img') && photoBtn.querySelector('img').remove();
-        if (url) photoBtn.prepend(el(`<img alt="Photo for day ${d}" src="${esc(url)}">`));
+        if (url) photoBtn.prepend(el(`<img alt="Photo for day ${d}" src="${esc(url)}" style="object-position:${focus[0]}% ${focus[1]}%">`));
         photoBtn.querySelector('.ph-label').hidden = hasPhoto;
         tools.hidden = !hasPhoto;
         setFilled();
@@ -390,12 +391,19 @@
       const upload = async (f) => {
         if (!f || !/^image\//.test(f.type)) return U.toast('That file isn’t a photo. Choose a JPG, PNG or HEIC image.', { kind: 'error' });
         const ov = el('<span class="busy">Uploading…</span>'); photoBtn.appendChild(ov);
-        try { const blob = await U.compressImage(f); showPhoto(await api.uploadPhoto(c.id, d, blob)); st2.textContent = 'Saved'; st2.className = 'st saved'; }
+        try { const blob = await U.compressImage(f); focus = [50, 50]; showPhoto(await api.uploadPhoto(c.id, d, blob)); st2.textContent = 'Saved'; st2.className = 'st saved'; }
         catch (err) { U.toast(err.message || 'That photo couldn’t be uploaded. Try a different one.', { kind: 'error' }); }
         finally { ov.remove(); }
       };
       photoBtn.addEventListener('click', () => file.click());
       tools.querySelector('[data-act="replace"]').addEventListener('click', () => file.click());
+      tools.querySelector('[data-act="focus"]').addEventListener('click', () => focusModal(c, d, photoURL, focus, async (f) => {
+        focus = f;
+        const im = photoBtn.querySelector('img'); if (im) im.style.objectPosition = `${f[0]}% ${f[1]}%`;
+        st2.textContent = 'Saving…'; st2.className = 'st';
+        try { await api.saveFocus(c.id, d, f[0], f[1]); st2.textContent = 'Saved'; st2.className = 'st saved'; }
+        catch (err) { st2.textContent = 'Not saved'; U.toast(err.message, { kind: 'error' }); }
+      }));
       tools.querySelector('[data-act="remove"]').addEventListener('click', async () => { await api.removePhoto(c.id, d); showPhoto(null); });
       file.addEventListener('change', () => { upload(file.files[0]); file.value = ''; });
       ['dragenter', 'dragover'].forEach((ev) => photoBtn.addEventListener(ev, (e) => { e.preventDefault(); photoBtn.classList.add('dragover'); }));
@@ -428,6 +436,81 @@
     const f = m.querySelector('input, button'); f && f.focus();
     return { m, close };
   }
+  /** Choose which part of a photo shows through its little door (saved as object-position percentages). */
+  function focusModal(c, d, url, start, onSave) {
+    if (!url) return;
+    const des = A.designs[c.design] || A.designs.parlor;
+    const L = ((A.layouts && A.layouts[des.layout]) || []).find((l) => l.day === d);
+    const a = L ? L.w / L.h : 1; // the door's shape for this day in this design
+    const { m, close } = modal(`<h2>Day ${d}: what shows in the door</h2>
+      <p style="color:var(--ink-soft)">Drag the bright frame over the part of the photo you want peeking out of door ${d}. The whole photo still shows when the door is opened up big.</p>
+      <div class="focus-wrap">
+        <div class="focus-stage"><div class="focus-pic"><img alt="Photo for day ${d}" src="${esc(url)}" draggable="false"><div class="focus-frame" tabindex="0" role="slider" aria-label="Photo position"></div></div></div>
+        <figure class="focus-preview"><div class="focus-door" style="aspect-ratio:${a.toFixed(4)};width:${Math.round(Math.min(132, 180 * a))}px"><img alt="" src="${esc(url)}"></div><figcaption>How door ${d} will look</figcaption></figure>
+      </div>
+      <p class="focus-none hint" hidden>This photo is already the same shape as the door, so all of it shows.</p>
+      <div class="modal-actions"><button class="btn ghost small" type="button" data-act="center" style="color:#6d0f1d;border-color:#c4a86e">Centre it</button><button class="btn ghost small" type="button" data-close style="color:#6d0f1d;border-color:#c4a86e">Cancel</button><button class="btn small" type="button" data-act="save">Save position</button></div>`);
+    const stage = m.querySelector('.focus-pic'), img = stage.querySelector('img'), frame = m.querySelector('.focus-frame');
+    const prev = m.querySelector('.focus-door img');
+    let f = [start[0], start[1]], g = null; // g: rendered geometry
+    const clamp = (v) => Math.max(0, Math.min(100, v));
+    const measure = () => {
+      const iw = img.clientWidth, ih = img.clientHeight;
+      if (!iw || !ih) return null;
+      const wide = iw / ih > a; // photo wider than the door: frame slides sideways, else up and down
+      const fw = wide ? ih * a : iw, fh = wide ? ih : iw / a;
+      return { iw, ih, fw, fh, slackX: iw - fw, slackY: ih - fh };
+    };
+    const draw = () => {
+      g = measure(); if (!g) return;
+      Object.assign(frame.style, { width: g.fw + 'px', height: g.fh + 'px', left: (g.slackX * f[0]) / 100 + 'px', top: (g.slackY * f[1]) / 100 + 'px' });
+      prev.style.objectPosition = `${f[0]}% ${f[1]}%`;
+      frame.setAttribute('aria-valuetext', `${Math.round(g.slackX > 1 ? f[0] : f[1])}%`);
+      m.querySelector('.focus-none').hidden = g.slackX > 1 || g.slackY > 1;
+    };
+    const setFromCentre = (cx, cy) => {
+      if (!g) return;
+      if (g.slackX > 1) f[0] = clamp(((cx - g.fw / 2) / g.slackX) * 100);
+      if (g.slackY > 1) f[1] = clamp(((cy - g.fh / 2) / g.slackY) * 100);
+      draw();
+    };
+    let drag = null;
+    stage.addEventListener('pointerdown', (e) => {
+      if (!g) return;
+      e.preventDefault();
+      const r = stage.getBoundingClientRect();
+      const px = e.clientX - r.left, py = e.clientY - r.top;
+      const fl = (g.slackX * f[0]) / 100, ft = (g.slackY * f[1]) / 100;
+      const inside = px >= fl && px <= fl + g.fw && py >= ft && py <= ft + g.fh;
+      if (!inside) setFromCentre(px, py);
+      const fl2 = (g.slackX * f[0]) / 100, ft2 = (g.slackY * f[1]) / 100;
+      drag = { dx: px - fl2 - g.fw / 2, dy: py - ft2 - g.fh / 2, r };
+      stage.setPointerCapture(e.pointerId);
+      stage.classList.add('dragging');
+    });
+    stage.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      setFromCentre(e.clientX - drag.r.left - drag.dx, e.clientY - drag.r.top - drag.dy);
+    });
+    const end = () => { drag = null; stage.classList.remove('dragging'); };
+    stage.addEventListener('pointerup', end);
+    stage.addEventListener('pointercancel', end);
+    frame.addEventListener('keydown', (e) => {
+      const step = e.shiftKey ? 10 : 2;
+      const k = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
+      if (!k) return;
+      e.preventDefault();
+      f = [clamp(f[0] + k[0]), clamp(f[1] + k[1])];
+      draw();
+    });
+    const ro = new ResizeObserver(draw); ro.observe(stage);
+    img.addEventListener('load', draw);
+    if (img.complete) draw();
+    m.querySelector('[data-act="center"]').addEventListener('click', () => { f = [50, 50]; draw(); });
+    m.querySelector('[data-act="save"]').addEventListener('click', () => { ro.disconnect(); close(); onSave([Math.round(f[0]), Math.round(f[1])]); });
+    frame.focus();
+  }
+
   function shareModal(c, onChange) {
     const url = shareURL(c.share_token);
     const { m } = modal(`<h2>Share “${esc(c.title)}”</h2>

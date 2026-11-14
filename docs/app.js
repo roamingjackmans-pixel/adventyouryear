@@ -6928,6 +6928,8 @@ A.layouts["workshop"]=[{"day":1,"x":511,"y":876,"w":96,"h":86,"hinge":"top"},
 (function () {
   const A = (window.AYY = window.AYY || {});
   const { esc, el, sleep, fmtDate, isUnlocked, daysUntil, MONTHS } = A.util;
+  /** Which part of a photo shows through its door: day data `focus` = [x%, y%], default centred. */
+  const focusCSS = (data) => { const f = (data && data.focus) || [50, 50]; return `${f[0]}% ${f[1]}%`; };
 
   /* ---------------- scene rasterising (cached per design) ---------------- */
   const sceneCache = {};
@@ -7339,6 +7341,8 @@ A.layouts["workshop"]=[{"day":1,"x":511,"y":876,"w":96,"h":86,"hinge":"top"},
         wrap.appendChild(door);
         const btn = door.querySelector('.door-flap');
         btn.addEventListener('click', () => this.onDoor(day));
+        // once a door is open, the photo in the opening brings up the big view too
+        door.querySelector('.door-well').addEventListener('click', () => { if (door.classList.contains('open')) this.onDoor(day); });
         this.doors[day] = door;
         this.refreshDoor(day, true);
       }
@@ -7352,6 +7356,7 @@ A.layouts["workshop"]=[{"day":1,"x":511,"y":876,"w":96,"h":86,"hinge":"top"},
       let src = data && data.image_url;
       if (!src && this.o.getImage) src = await this.o.getImage(day);
       if (!src) { door.classList.add('no-photo'); img.dataset.loaded = '1'; return img; }
+      img.style.objectPosition = focusCSS(data);
       img.src = src;
       img.dataset.loaded = '1';
       try { await img.decode(); } catch (e) { /* ignore */ }
@@ -7495,7 +7500,7 @@ A.layouts["workshop"]=[{"day":1,"x":511,"y":876,"w":96,"h":86,"hinge":"top"},
         const doorImg = await this.b.loadPhoto(day);
         const has = !!doorImg.getAttribute('src');
         photo.classList.toggle('empty', !has);
-        if (has) { img.src = doorImg.src; try { await img.decode(); } catch (e) { /* ignore */ } }
+        if (has) { img.style.objectPosition = doorImg.style.objectPosition; img.src = doorImg.src; try { await img.decode(); } catch (e) { /* ignore */ } }
         note.innerHTML = this.noteHTML(day);
         root.setAttribute('aria-label', `Day ${day}`);
         const days = this.b.openedDays();
@@ -7775,7 +7780,7 @@ A.layouts["workshop"]=[{"day":1,"x":511,"y":876,"w":96,"h":86,"hinge":"top"},
         if (!row) continue;
         let image_url = null;
         if (row.blob_id) { const b = await kv.get('blobs', row.blob_id); if (b) image_url = URL.createObjectURL(b); }
-        days[d] = { caption: row.caption || '', image_url };
+        days[d] = { caption: row.caption || '', image_url, focus: [row.focus_x ?? 50, row.focus_y ?? 50] };
       }
       const opened = new Set((await kv.all('opens')).filter((o) => o.calendar_id === id && current && o.user_id === current.id).map((o) => o.day));
       return { calendar: c, role: isOwner ? 'owner' : 'recipient', days, opened };
@@ -7791,9 +7796,15 @@ A.layouts["workshop"]=[{"day":1,"x":511,"y":876,"w":96,"h":86,"hinge":"top"},
       const row = (await kv.get('days', id + ':' + day)) || { calendar_id: id, day };
       if (row.blob_id) await kv.del('blobs', row.blob_id);
       row.blob_id = uid();
+      row.focus_x = 50; row.focus_y = 50;
       await kv.put('blobs', row.blob_id, blob);
       await kv.put('days', id + ':' + day, row);
       return URL.createObjectURL(blob);
+    },
+    async saveFocus(id, day, x, y) {
+      const row = (await kv.get('days', id + ':' + day)) || { calendar_id: id, day };
+      row.focus_x = Math.round(x); row.focus_y = Math.round(y);
+      await kv.put('days', id + ':' + day, row);
     },
     async removePhoto(id, day) {
       const row = await kv.get('days', id + ':' + day);
@@ -7949,10 +7960,10 @@ A.layouts["workshop"]=[{"day":1,"x":511,"y":876,"w":96,"h":86,"hinge":"top"},
         const cal = check(await sb.from('calendars').select('*').eq('id', id).maybeSingle());
         if (!cal) { const e = new Error('This calendar was shared with a different email address. Sign in with the email it was sent to.'); e.code = 'forbidden'; throw e; }
         const role = current && cal.owner_id === current.id ? 'owner' : 'recipient';
-        const rows = check(await sb.from('calendar_days').select('day, caption, image_path').eq('calendar_id', id));
+        const rows = check(await sb.from('calendar_days').select('day, caption, image_path, focus_x, focus_y').eq('calendar_id', id));
         const urls = await signedUrls(rows.filter((r) => r.image_path).map((r) => r.image_path));
         const days = {};
-        rows.forEach((r) => { days[r.day] = { caption: r.caption || '', image_url: r.image_path ? urls[r.image_path] || null : null }; });
+        rows.forEach((r) => { days[r.day] = { caption: r.caption || '', image_url: r.image_path ? urls[r.image_path] || null : null, focus: [r.focus_x ?? 50, r.focus_y ?? 50] }; });
         const opens = current ? check(await sb.from('day_opens').select('day').eq('calendar_id', id).eq('user_id', current.id)) : [];
         return { calendar: cal, role, days, opened: new Set(opens.map((o) => o.day)) };
       },
@@ -7963,10 +7974,13 @@ A.layouts["workshop"]=[{"day":1,"x":511,"y":876,"w":96,"h":86,"hinge":"top"},
         const prev = check(await sb.from('calendar_days').select('image_path').eq('calendar_id', id).eq('day', day).maybeSingle());
         const path = `${id}/${day}-${Date.now().toString(36)}.jpg`;
         check(await sb.storage.from(BUCKET).upload(path, blob, { contentType: 'image/jpeg', upsert: false }));
-        check(await sb.from('calendar_days').upsert({ calendar_id: id, day, image_path: path }, { onConflict: 'calendar_id,day' }));
+        check(await sb.from('calendar_days').upsert({ calendar_id: id, day, image_path: path, focus_x: 50, focus_y: 50 }, { onConflict: 'calendar_id,day' }));
         if (prev && prev.image_path) await sb.storage.from(BUCKET).remove([prev.image_path]);
         const urls = await signedUrls([path]);
         return urls[path];
+      },
+      async saveFocus(id, day, x, y) {
+        check(await sb.from('calendar_days').update({ focus_x: Math.round(x), focus_y: Math.round(y) }).eq('calendar_id', id).eq('day', day));
       },
       async removePhoto(id, day) {
         const prev = check(await sb.from('calendar_days').select('image_path').eq('calendar_id', id).eq('day', day).maybeSingle());
@@ -8327,7 +8341,7 @@ A.layouts["workshop"]=[{"day":1,"x":511,"y":876,"w":96,"h":86,"hinge":"top"},
         </form>
         <div class="side-actions">
           <a class="btn gold" href="#preview-${c.id}">Preview the calendar</a>
-          <button class="btn" type="button" data-act="share">Share with family</button>
+          <button class="btn" type="button" data-act="share">Share the Calendar</button>
           <p class="shared-with" id="shared-with"></p>
           <button class="btn danger-text small" type="button" data-act="delete">Delete this calendar</button>
         </div>
@@ -8382,20 +8396,21 @@ A.layouts["workshop"]=[{"day":1,"x":511,"y":876,"w":96,"h":86,"hinge":"top"},
         <header><b>${d}</b><span></span></header>
         <button class="day-photo" type="button" aria-label="Add a photo for day ${d}"><span class="ph-label">${ICON_PHOTO}<span>Add a photo</span></span></button>
         <input type="file" accept="image/*" hidden id="file-${d}">
-        <div class="photo-tools" hidden><button type="button" data-act="replace">Replace</button><button type="button" data-act="remove">Remove</button></div>
+        <div class="photo-tools" hidden><button type="button" data-act="focus">Adjust position</button><button type="button" data-act="replace">Replace</button><button type="button" data-act="remove">Remove</button></div>
         <label class="field" for="cap-${d}"><span class="hint" style="font-weight:600;color:var(--ink)">Note</span><textarea class="textarea" id="cap-${d}" maxlength="400" placeholder="A memory, a joke, a little message…">${esc(day.caption || '')}</textarea></label>
         <div class="day-foot"><span class="count"></span><span class="st"></span></div>
       </article>`);
       grid.appendChild(card);
       const photoBtn = card.querySelector('.day-photo'), file = card.querySelector('input[type=file]'), tools = card.querySelector('.photo-tools');
       const ta = card.querySelector('textarea'), st2 = card.querySelector('.st'), cnt = card.querySelector('.count');
-      let hasPhoto = false;
+      let hasPhoto = false, photoURL = null;
+      let focus = day.focus || [50, 50];
       const setFilled = () => { card.dataset.filled = hasPhoto || ta.value.trim() ? '1' : '0'; counts(); };
       const showPhoto = (url) => {
-        hasPhoto = !!url;
+        hasPhoto = !!url; photoURL = url || null;
         photoBtn.classList.toggle('has', hasPhoto);
         photoBtn.querySelector('img') && photoBtn.querySelector('img').remove();
-        if (url) photoBtn.prepend(el(`<img alt="Photo for day ${d}" src="${esc(url)}">`));
+        if (url) photoBtn.prepend(el(`<img alt="Photo for day ${d}" src="${esc(url)}" style="object-position:${focus[0]}% ${focus[1]}%">`));
         photoBtn.querySelector('.ph-label').hidden = hasPhoto;
         tools.hidden = !hasPhoto;
         setFilled();
@@ -8404,12 +8419,19 @@ A.layouts["workshop"]=[{"day":1,"x":511,"y":876,"w":96,"h":86,"hinge":"top"},
       const upload = async (f) => {
         if (!f || !/^image\//.test(f.type)) return U.toast('That file isn’t a photo. Choose a JPG, PNG or HEIC image.', { kind: 'error' });
         const ov = el('<span class="busy">Uploading…</span>'); photoBtn.appendChild(ov);
-        try { const blob = await U.compressImage(f); showPhoto(await api.uploadPhoto(c.id, d, blob)); st2.textContent = 'Saved'; st2.className = 'st saved'; }
+        try { const blob = await U.compressImage(f); focus = [50, 50]; showPhoto(await api.uploadPhoto(c.id, d, blob)); st2.textContent = 'Saved'; st2.className = 'st saved'; }
         catch (err) { U.toast(err.message || 'That photo couldn’t be uploaded. Try a different one.', { kind: 'error' }); }
         finally { ov.remove(); }
       };
       photoBtn.addEventListener('click', () => file.click());
       tools.querySelector('[data-act="replace"]').addEventListener('click', () => file.click());
+      tools.querySelector('[data-act="focus"]').addEventListener('click', () => focusModal(c, d, photoURL, focus, async (f) => {
+        focus = f;
+        const im = photoBtn.querySelector('img'); if (im) im.style.objectPosition = `${f[0]}% ${f[1]}%`;
+        st2.textContent = 'Saving…'; st2.className = 'st';
+        try { await api.saveFocus(c.id, d, f[0], f[1]); st2.textContent = 'Saved'; st2.className = 'st saved'; }
+        catch (err) { st2.textContent = 'Not saved'; U.toast(err.message, { kind: 'error' }); }
+      }));
       tools.querySelector('[data-act="remove"]').addEventListener('click', async () => { await api.removePhoto(c.id, d); showPhoto(null); });
       file.addEventListener('change', () => { upload(file.files[0]); file.value = ''; });
       ['dragenter', 'dragover'].forEach((ev) => photoBtn.addEventListener(ev, (e) => { e.preventDefault(); photoBtn.classList.add('dragover'); }));
@@ -8442,6 +8464,81 @@ A.layouts["workshop"]=[{"day":1,"x":511,"y":876,"w":96,"h":86,"hinge":"top"},
     const f = m.querySelector('input, button'); f && f.focus();
     return { m, close };
   }
+  /** Choose which part of a photo shows through its little door (saved as object-position percentages). */
+  function focusModal(c, d, url, start, onSave) {
+    if (!url) return;
+    const des = A.designs[c.design] || A.designs.parlor;
+    const L = ((A.layouts && A.layouts[des.layout]) || []).find((l) => l.day === d);
+    const a = L ? L.w / L.h : 1; // the door's shape for this day in this design
+    const { m, close } = modal(`<h2>Day ${d}: what shows in the door</h2>
+      <p style="color:var(--ink-soft)">Drag the bright frame over the part of the photo you want peeking out of door ${d}. The whole photo still shows when the door is opened up big.</p>
+      <div class="focus-wrap">
+        <div class="focus-stage"><div class="focus-pic"><img alt="Photo for day ${d}" src="${esc(url)}" draggable="false"><div class="focus-frame" tabindex="0" role="slider" aria-label="Photo position"></div></div></div>
+        <figure class="focus-preview"><div class="focus-door" style="aspect-ratio:${a.toFixed(4)};width:${Math.round(Math.min(132, 180 * a))}px"><img alt="" src="${esc(url)}"></div><figcaption>How door ${d} will look</figcaption></figure>
+      </div>
+      <p class="focus-none hint" hidden>This photo is already the same shape as the door, so all of it shows.</p>
+      <div class="modal-actions"><button class="btn ghost small" type="button" data-act="center" style="color:#6d0f1d;border-color:#c4a86e">Centre it</button><button class="btn ghost small" type="button" data-close style="color:#6d0f1d;border-color:#c4a86e">Cancel</button><button class="btn small" type="button" data-act="save">Save position</button></div>`);
+    const stage = m.querySelector('.focus-pic'), img = stage.querySelector('img'), frame = m.querySelector('.focus-frame');
+    const prev = m.querySelector('.focus-door img');
+    let f = [start[0], start[1]], g = null; // g: rendered geometry
+    const clamp = (v) => Math.max(0, Math.min(100, v));
+    const measure = () => {
+      const iw = img.clientWidth, ih = img.clientHeight;
+      if (!iw || !ih) return null;
+      const wide = iw / ih > a; // photo wider than the door: frame slides sideways, else up and down
+      const fw = wide ? ih * a : iw, fh = wide ? ih : iw / a;
+      return { iw, ih, fw, fh, slackX: iw - fw, slackY: ih - fh };
+    };
+    const draw = () => {
+      g = measure(); if (!g) return;
+      Object.assign(frame.style, { width: g.fw + 'px', height: g.fh + 'px', left: (g.slackX * f[0]) / 100 + 'px', top: (g.slackY * f[1]) / 100 + 'px' });
+      prev.style.objectPosition = `${f[0]}% ${f[1]}%`;
+      frame.setAttribute('aria-valuetext', `${Math.round(g.slackX > 1 ? f[0] : f[1])}%`);
+      m.querySelector('.focus-none').hidden = g.slackX > 1 || g.slackY > 1;
+    };
+    const setFromCentre = (cx, cy) => {
+      if (!g) return;
+      if (g.slackX > 1) f[0] = clamp(((cx - g.fw / 2) / g.slackX) * 100);
+      if (g.slackY > 1) f[1] = clamp(((cy - g.fh / 2) / g.slackY) * 100);
+      draw();
+    };
+    let drag = null;
+    stage.addEventListener('pointerdown', (e) => {
+      if (!g) return;
+      e.preventDefault();
+      const r = stage.getBoundingClientRect();
+      const px = e.clientX - r.left, py = e.clientY - r.top;
+      const fl = (g.slackX * f[0]) / 100, ft = (g.slackY * f[1]) / 100;
+      const inside = px >= fl && px <= fl + g.fw && py >= ft && py <= ft + g.fh;
+      if (!inside) setFromCentre(px, py);
+      const fl2 = (g.slackX * f[0]) / 100, ft2 = (g.slackY * f[1]) / 100;
+      drag = { dx: px - fl2 - g.fw / 2, dy: py - ft2 - g.fh / 2, r };
+      stage.setPointerCapture(e.pointerId);
+      stage.classList.add('dragging');
+    });
+    stage.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      setFromCentre(e.clientX - drag.r.left - drag.dx, e.clientY - drag.r.top - drag.dy);
+    });
+    const end = () => { drag = null; stage.classList.remove('dragging'); };
+    stage.addEventListener('pointerup', end);
+    stage.addEventListener('pointercancel', end);
+    frame.addEventListener('keydown', (e) => {
+      const step = e.shiftKey ? 10 : 2;
+      const k = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
+      if (!k) return;
+      e.preventDefault();
+      f = [clamp(f[0] + k[0]), clamp(f[1] + k[1])];
+      draw();
+    });
+    const ro = new ResizeObserver(draw); ro.observe(stage);
+    img.addEventListener('load', draw);
+    if (img.complete) draw();
+    m.querySelector('[data-act="center"]').addEventListener('click', () => { f = [50, 50]; draw(); });
+    m.querySelector('[data-act="save"]').addEventListener('click', () => { ro.disconnect(); close(); onSave([Math.round(f[0]), Math.round(f[1])]); });
+    frame.focus();
+  }
+
   function shareModal(c, onChange) {
     const url = shareURL(c.share_token);
     const { m } = modal(`<h2>Share “${esc(c.title)}”</h2>

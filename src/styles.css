@@ -223,6 +223,19 @@ h1, h2, h3 { font-family: var(--f-display); font-weight: 400; text-wrap: balance
 .day-photo.dragover { border-color: var(--berry); background: #f4dcd8; }
 .day-photo .busy { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(246, 238, 220, 0.8); font-weight: 600; }
 .photo-tools { display: flex; gap: 8px; justify-content: flex-end; }
+.focus-wrap { display: flex; gap: 18px; align-items: flex-start; }
+.focus-stage { flex: 1 1 auto; min-width: 0; display: flex; justify-content: center; border-radius: 6px; background: #1d120a; }
+.focus-pic { position: relative; max-width: 100%; overflow: hidden; line-height: 0; cursor: grab; touch-action: none; user-select: none; }
+.focus-pic.dragging { cursor: grabbing; }
+.focus-pic img { display: block; max-width: 100%; max-height: 58vh; pointer-events: none; }
+.focus-frame { position: absolute; box-shadow: 0 0 0 9999px rgba(12, 6, 2, 0.62), inset 0 0 0 2px #fff3d6, 0 0 0 1px rgba(0, 0, 0, 0.6); border-radius: 2px; outline: none; }
+.focus-frame:focus-visible { box-shadow: 0 0 0 9999px rgba(12, 6, 2, 0.62), inset 0 0 0 3px var(--gold-hi), 0 0 0 1px rgba(0, 0, 0, 0.6); }
+.focus-preview { flex: 0 0 140px; margin: 0; text-align: center; }
+.focus-door { margin: 0 auto; overflow: hidden; border-radius: 2px; box-shadow: inset 0 0 0 1.5px rgba(0, 0, 0, 0.8), 0 3px 10px rgba(0, 0, 0, 0.3); background: #1d120a; position: relative; }
+.focus-door img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.focus-preview figcaption { font-size: 13px; color: var(--ink-soft); margin-top: 6px; }
+.modal .paper:has(.focus-wrap) { max-width: 820px; }
+@media (max-width: 640px) { .focus-wrap { flex-direction: column; align-items: stretch; } .focus-preview { flex-basis: auto; width: 110px; align-self: center; } }
 .photo-tools button { background: none; border: 0; color: var(--ink-soft); font-size: 13px; text-decoration: underline; cursor: pointer; padding: 2px; }
 .day-card .textarea { min-height: 88px; font-size: 15px; }
 .day-foot { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-soft); min-height: 16px; }
@@ -301,6 +314,7 @@ h1, h2, h3 { font-family: var(--f-display); font-weight: 400; text-wrap: balance
 .door-photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 0.4s; }
 .door-photo[src] { opacity: 1; }
 .door.lifted .door-photo { visibility: hidden; }
+.door.open .door-well { cursor: zoom-in; }
 .door-well-shade { position: absolute; inset: 0; pointer-events: none; box-shadow: inset 7px 9px 18px rgba(0, 0, 0, 0.72), inset -1px -1px 4px rgba(0, 0, 0, 0.5); }
 .door.no-photo .door-well { background: radial-gradient(circle at 50% 45%, #6b4a2a, #2c1a0c); }
 .door-shadow { position: absolute; top: 0; height: 100%; width: 100%; opacity: 0; transition: opacity 0.9s; pointer-events: none; }

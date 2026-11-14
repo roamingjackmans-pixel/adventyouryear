@@ -108,10 +108,10 @@
         const cal = check(await sb.from('calendars').select('*').eq('id', id).maybeSingle());
         if (!cal) { const e = new Error('This calendar was shared with a different email address. Sign in with the email it was sent to.'); e.code = 'forbidden'; throw e; }
         const role = current && cal.owner_id === current.id ? 'owner' : 'recipient';
-        const rows = check(await sb.from('calendar_days').select('day, caption, image_path').eq('calendar_id', id));
+        const rows = check(await sb.from('calendar_days').select('day, caption, image_path, focus_x, focus_y').eq('calendar_id', id));
         const urls = await signedUrls(rows.filter((r) => r.image_path).map((r) => r.image_path));
         const days = {};
-        rows.forEach((r) => { days[r.day] = { caption: r.caption || '', image_url: r.image_path ? urls[r.image_path] || null : null }; });
+        rows.forEach((r) => { days[r.day] = { caption: r.caption || '', image_url: r.image_path ? urls[r.image_path] || null : null, focus: [r.focus_x ?? 50, r.focus_y ?? 50] }; });
         const opens = current ? check(await sb.from('day_opens').select('day').eq('calendar_id', id).eq('user_id', current.id)) : [];
         return { calendar: cal, role, days, opened: new Set(opens.map((o) => o.day)) };
       },
@@ -122,10 +122,13 @@
         const prev = check(await sb.from('calendar_days').select('image_path').eq('calendar_id', id).eq('day', day).maybeSingle());
         const path = `${id}/${day}-${Date.now().toString(36)}.jpg`;
         check(await sb.storage.from(BUCKET).upload(path, blob, { contentType: 'image/jpeg', upsert: false }));
-        check(await sb.from('calendar_days').upsert({ calendar_id: id, day, image_path: path }, { onConflict: 'calendar_id,day' }));
+        check(await sb.from('calendar_days').upsert({ calendar_id: id, day, image_path: path, focus_x: 50, focus_y: 50 }, { onConflict: 'calendar_id,day' }));
         if (prev && prev.image_path) await sb.storage.from(BUCKET).remove([prev.image_path]);
         const urls = await signedUrls([path]);
         return urls[path];
+      },
+      async saveFocus(id, day, x, y) {
+        check(await sb.from('calendar_days').update({ focus_x: Math.round(x), focus_y: Math.round(y) }).eq('calendar_id', id).eq('day', day));
       },
       async removePhoto(id, day) {
         const prev = check(await sb.from('calendar_days').select('image_path').eq('calendar_id', id).eq('day', day).maybeSingle());

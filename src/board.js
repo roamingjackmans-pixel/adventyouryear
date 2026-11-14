@@ -3,6 +3,8 @@
 (function () {
   const A = (window.AYY = window.AYY || {});
   const { esc, el, sleep, fmtDate, isUnlocked, daysUntil, MONTHS } = A.util;
+  /** Which part of a photo shows through its door: day data `focus` = [x%, y%], default centred. */
+  const focusCSS = (data) => { const f = (data && data.focus) || [50, 50]; return `${f[0]}% ${f[1]}%`; };
 
   /* ---------------- scene rasterising (cached per design) ---------------- */
   const sceneCache = {};
@@ -414,6 +416,8 @@
         wrap.appendChild(door);
         const btn = door.querySelector('.door-flap');
         btn.addEventListener('click', () => this.onDoor(day));
+        // once a door is open, the photo in the opening brings up the big view too
+        door.querySelector('.door-well').addEventListener('click', () => { if (door.classList.contains('open')) this.onDoor(day); });
         this.doors[day] = door;
         this.refreshDoor(day, true);
       }
@@ -427,6 +431,7 @@
       let src = data && data.image_url;
       if (!src && this.o.getImage) src = await this.o.getImage(day);
       if (!src) { door.classList.add('no-photo'); img.dataset.loaded = '1'; return img; }
+      img.style.objectPosition = focusCSS(data);
       img.src = src;
       img.dataset.loaded = '1';
       try { await img.decode(); } catch (e) { /* ignore */ }
@@ -570,7 +575,7 @@
         const doorImg = await this.b.loadPhoto(day);
         const has = !!doorImg.getAttribute('src');
         photo.classList.toggle('empty', !has);
-        if (has) { img.src = doorImg.src; try { await img.decode(); } catch (e) { /* ignore */ } }
+        if (has) { img.style.objectPosition = doorImg.style.objectPosition; img.src = doorImg.src; try { await img.decode(); } catch (e) { /* ignore */ } }
         note.innerHTML = this.noteHTML(day);
         root.setAttribute('aria-label', `Day ${day}`);
         const days = this.b.openedDays();

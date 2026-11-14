@@ -1,0 +1,9 @@
+node_modules/
+preview/
+supabase/.temp/
+supabase/.branches/
+.env
+*.local
+dist
+reference/
+.claude/

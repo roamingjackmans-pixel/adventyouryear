@@ -1,0 +1,31 @@
+<!doctype html><meta charset="utf-8"><title>scene</title>
+<body style="margin:0;background:#111;color:#ccc;font:13px sans-serif">
+<!-- Scene check: /tools/scene.html?d=<design-id>[&doors=1]  -- shows the raw scene, keep-out zones (red) and door footprints (cyan) -->
+<div id="o"></div><div id="msg"></div>
+<script src="../src/util.js"></script>
+<script>
+const id = new URLSearchParams(location.search).get('d') || 'parlor';
+const showDoors = new URLSearchParams(location.search).get('doors') !== '0';
+document.write(`<script src="../src/designs/${id}.js?${Date.now()}"><\/script><script src="../src/layouts/${id}.js?${Date.now()}" onerror="0"><\/script>`);
+</script>
+<script>
+const D = AYY.designs[id];
+const t = performance.now(); const r = D.build();
+document.getElementById('o').innerHTML = r.svg.replace(/width="\d+" height="\d+"/, 'width="100%"');
+const s = document.querySelector('#o svg'); let g = '';
+if (showDoors) {
+  (D.keepOut || []).forEach(([x, y, w, h]) => g += `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#f00" opacity=".18" stroke="#f00"/>`);
+  const L = (AYY.layouts || {})[id] || [];
+  for (const d of L) {
+    const fx = d.hinge === 'left' ? d.x - d.w : d.hinge === 'right' ? d.x + d.w : d.hinge === 'double' ? d.x - d.w / 2 : d.x;
+    const fy = d.hinge === 'top' ? d.y - d.h : d.y;
+    const fw = d.hinge === 'double' ? d.w / 2 : d.w;
+    g += `<rect x="${fx}" y="${fy}" width="${fw}" height="${d.h}" fill="#0ff" opacity=".15"/>`;
+    if (d.hinge === 'double') g += `<rect x="${d.x + d.w}" y="${d.y}" width="${d.w / 2}" height="${d.h}" fill="#0ff" opacity=".15"/>`;
+    g += `<rect x="${d.x}" y="${d.y}" width="${d.w}" height="${d.h}" fill="none" stroke="#fff" stroke-width="3" stroke-dasharray="8 5"/><text x="${d.x + d.w / 2}" y="${d.y + d.h / 2 + 16}" font-size="44" fill="#fff" text-anchor="middle" font-family="Georgia">${d.day}</text>`;
+  }
+  if (D.title) g += `<path d="${D.title.path}" stroke="#ff0" stroke-width="3" fill="none" stroke-dasharray="6 6"/>`;
+}
+s.insertAdjacentHTML('beforeend', g);
+document.getElementById('msg').textContent = `${id}: built in ${Math.round(performance.now() - t)}ms, ${(r.svg.length / 1024).toFixed(0)}KB, ${r.lights.length} lights, ${r.candles.length} candles`;
+</script>

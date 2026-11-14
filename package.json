@@ -1,0 +1,15 @@
+{
+  "name": "advent-your-year",
+  "private": true,
+  "description": "Photo advent calendars at josephjackman.com/adventyouryear",
+  "scripts": {
+    "build": "node build.mjs",
+    "serve": "node tools/serve.mjs 5173",
+    "layout": "node tools/layout.mjs",
+    "supabase": "supabase"
+  },
+  "devDependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "supabase": "2.122.0"
+  }
+}

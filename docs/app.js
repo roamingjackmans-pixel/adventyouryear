@@ -7293,11 +7293,11 @@ A.layouts["workshop"]=[{"day":1,"x":511,"y":876,"w":96,"h":86,"hinge":"top"},
       this.stage.classList.toggle('scrolls', this.scrolls);
       this.fx && this.fx.resize(s);
     }
+    /** On phones the board scrolls sideways; start in the middle of the scene, not at today's door,
+        so finding it is still a hunt. */
     scrollToToday() {
       if (!this.scrolls) return;
-      const t = this.layout.find((L) => this.doors[L.day] && this.doors[L.day].classList.contains('today')) || this.layout.find((L) => L.day === 1);
-      const x = (t.x + t.w / 2) * this.scale - this.stage.clientWidth / 2;
-      this.stage.scrollLeft = Math.max(0, x);
+      this.stage.scrollLeft = Math.max(0, (this.design.width * this.scale - this.stage.clientWidth) / 2);
     }
     async fitTitle() {
       try { await document.fonts.ready; } catch (e) { /* ignore */ }
@@ -7368,7 +7368,6 @@ A.layouts["workshop"]=[{"day":1,"x":511,"y":876,"w":96,"h":86,"hinge":"top"},
       const isOpen = this.opened.has(day) && unlocked;
       const data = this.dayData(day);
       door.classList.toggle('locked', !unlocked);
-      door.classList.toggle('today', unlocked && !isOpen && this.o.mode !== 'preview' && daysUntil(this.cal, day) === 0);
       door.classList.toggle('ready-to-open', unlocked && !isOpen);
       door.classList.toggle('open', isOpen);
       door.classList.toggle('written', isOpen);
@@ -7411,7 +7410,7 @@ A.layouts["workshop"]=[{"day":1,"x":511,"y":876,"w":96,"h":86,"hinge":"top"},
         if (!this.opened.has(day)) {
           await this.loadPhoto(day);
           door.classList.add('open');
-          door.classList.remove('ready-to-open', 'today');
+          door.classList.remove('ready-to-open');
           this.opened.add(day);
           if (this.o.onOpened) Promise.resolve(this.o.onOpened(day)).catch(() => {});
           await sleep(A.util.prefersReducedMotion() ? 50 : 900);

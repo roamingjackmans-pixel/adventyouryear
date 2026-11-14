@@ -685,7 +685,7 @@ ${entries.map((e) => `<article><p class="d">Day ${e.d} of 24</p><h2>${esc(e.date
       <div class="cal-bar">
         <a class="back" href="#${back}">&#8592; ${esc(backLabel)}</a>
         <div class="who">${esc(cal.title || 'Advent calendar')}<small>${[cal.to_name && 'For ' + esc(cal.to_name), cal.from_name && 'from ' + esc(cal.from_name)].filter(Boolean).join(' · ')}</small></div>
-        <div class="status">${extra || ''}<span class="pill" id="cal-status"></span></div>
+        <div class="status"><button class="btn small" type="button" id="gallery-btn" title="See every opened door in one scroll">Gallery</button>${extra || ''}<span class="pill" id="cal-status"></span></div>
       </div>
       <div class="cal-host" id="cal-host"></div>
     </div>`;
@@ -697,6 +697,8 @@ ${entries.map((e) => `<article><p class="d">Day ${e.d} of 24</p><h2>${esc(e.date
       onLocked: (d, n, when) => U.toast(`Door ${d} opens ${when}. ${n === 1 ? 'Just one more sleep!' : `${n} sleeps to go.`}`),
     });
     refreshStatus();
+    const b0 = board;
+    document.getElementById('gallery-btn').addEventListener('click', () => b0.openGallery());
     return board;
   }
 

@@ -7489,6 +7489,7 @@ A.layouts["workshop"]=[{"day":1,"x":511,"y":876,"w":96,"h":86,"hinge":"top"},
       this.fx.start();
       door.querySelector('.door-flap').focus({ preventScroll: true });
     }
+    openGallery() { return openGallery(this); }
     openedDays() {
       return [...this.opened].filter((d) => this.unlocked(d)).sort((a, b) => a - b);
     }
@@ -7503,6 +7504,65 @@ A.layouts["workshop"]=[{"day":1,"x":511,"y":876,"w":96,"h":86,"hinge":"top"},
       document.removeEventListener('visibilitychange', this.onVis);
       this.stage && this.stage.remove();
     }
+  }
+
+  /** The written note for a day (shared by the big view and the gallery). */
+  function noteHTML(board, day) {
+    const cal = board.cal, data = board.dayData(day) || {};
+    const caption = data.caption ? esc(data.caption) : '<span class="lb-empty">Nothing written behind this door yet.</span>';
+    return `<p class="lb-eyebrow">Day ${day} of 24</p>
+      <h2 class="lb-date">${fmtDate(cal.start_year, cal.start_month, day, true)}</h2>
+      <div class="lb-rule" aria-hidden="true"></div>
+      <p class="lb-text">${caption}</p>
+      ${cal.from_name ? `<p class="lb-sign">${esc(cal.from_name)}</p>` : ''}`;
+  }
+
+  /** Every door opened so far, in one scrolling page: full-size photo and note, alternating sides. */
+  async function openGallery(board) {
+    const days = board.openedDays();
+    if (!days.length) { A.util.toast('Open a door first. Every door you open shows up here.'); return; }
+    if (document.querySelector('.gallery')) return;
+    board.fx.stop();
+    const cal = board.cal;
+    const root = el(`<div class="gallery" role="dialog" aria-modal="true" aria-label="Gallery">
+      <header class="gal-bar">
+        <div class="gal-title">${esc(cal.title || 'Advent calendar')}<small>${days.length === 24 ? 'All 24 doors' : `${days.length} of 24 doors opened`}</small></div>
+        <button class="lb-btn gal-close" type="button" aria-label="Close the gallery">&#215;</button>
+      </header>
+      <div class="gal-scroll"><div class="gal-list"></div><p class="gal-end">${days.length === 24 ? 'Merry Christmas' : 'More to come as each door opens'}</p></div>
+    </div>`);
+    const list = root.querySelector('.gal-list');
+    for (const d of days) {
+      const doorImg = await board.loadPhoto(d);
+      const src = doorImg.getAttribute('src');
+      list.appendChild(el(`<section class="gal-row" id="gal-day-${d}">
+        <figure class="gal-photo">${src ? `<img alt="Day ${d}" src="${esc(src)}" decoding="async">` : '<div class="gal-photo-empty">No photo behind this door</div>'}</figure>
+        <article class="gal-note">${noteHTML(board, d)}</article>
+      </section>`));
+    }
+    document.body.appendChild(root);
+    document.documentElement.classList.add('lb-lock');
+    void root.offsetWidth; // commit the hidden state so the fade-in runs
+    root.classList.add('in');
+    // rows drift in as they scroll into view
+    let io = null;
+    if (!A.util.prefersReducedMotion() && 'IntersectionObserver' in window) {
+      io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('shown'); io.unobserve(e.target); } }), { root: root.querySelector('.gal-scroll'), threshold: 0.12 });
+      list.querySelectorAll('.gal-row').forEach((r) => io.observe(r));
+      // safety net: if the browser never reports visibility, show everything rather than blank rows
+      setTimeout(() => { if (!list.querySelector('.gal-row.shown')) list.querySelectorAll('.gal-row').forEach((r) => r.classList.add('shown')); }, 1500);
+    } else list.querySelectorAll('.gal-row').forEach((r) => r.classList.add('shown'));
+    const close = () => {
+      window.removeEventListener('keydown', onKey);
+      io && io.disconnect();
+      root.classList.remove('in');
+      setTimeout(() => { root.remove(); document.documentElement.classList.remove('lb-lock'); board.fx.start(); }, 300);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('keydown', onKey);
+    const btn = root.querySelector('.gal-close');
+    btn.addEventListener('click', close);
+    btn.focus({ preventScroll: true });
   }
 
   class Lightbox {
@@ -7523,15 +7583,7 @@ A.layouts["workshop"]=[{"day":1,"x":511,"y":876,"w":96,"h":86,"hinge":"top"},
       if (h > box.h) { h = box.h; w = h * ar; }
       return { left: box.x + (box.w - w) / 2, top: box.y + (box.h - h) / 2, width: w, height: h, wide };
     }
-    noteHTML(day) {
-      const cal = this.b.cal, data = this.b.dayData(day) || {};
-      const caption = data.caption ? esc(data.caption) : '<span class="lb-empty">Nothing written behind this door yet.</span>';
-      return `<p class="lb-eyebrow">Day ${day} of 24</p>
-        <h2 class="lb-date">${fmtDate(cal.start_year, cal.start_month, day, true)}</h2>
-        <div class="lb-rule" aria-hidden="true"></div>
-        <p class="lb-text">${caption}</p>
-        ${cal.from_name ? `<p class="lb-sign">${esc(cal.from_name)}</p>` : ''}`;
-    }
+    noteHTML(day) { return noteHTML(this.b, day); }
     async run() {
       const reduced = A.util.prefersReducedMotion();
       const dur = reduced ? 1 : 720;
@@ -8781,7 +8833,7 @@ ${entries.map((e) => `<article><p class="d">Day ${e.d} of 24</p><h2>${esc(e.date
       <div class="cal-bar">
         <a class="back" href="#${back}">&#8592; ${esc(backLabel)}</a>
         <div class="who">${esc(cal.title || 'Advent calendar')}<small>${[cal.to_name && 'For ' + esc(cal.to_name), cal.from_name && 'from ' + esc(cal.from_name)].filter(Boolean).join(' · ')}</small></div>
-        <div class="status">${extra || ''}<span class="pill" id="cal-status"></span></div>
+        <div class="status"><button class="btn small" type="button" id="gallery-btn" title="See every opened door in one scroll">Gallery</button>${extra || ''}<span class="pill" id="cal-status"></span></div>
       </div>
       <div class="cal-host" id="cal-host"></div>
     </div>`;
@@ -8793,6 +8845,8 @@ ${entries.map((e) => `<article><p class="d">Day ${e.d} of 24</p><h2>${esc(e.date
       onLocked: (d, n, when) => U.toast(`Door ${d} opens ${when}. ${n === 1 ? 'Just one more sleep!' : `${n} sleeps to go.`}`),
     });
     refreshStatus();
+    const b0 = board;
+    document.getElementById('gallery-btn').addEventListener('click', () => b0.openGallery());
     return board;
   }
 

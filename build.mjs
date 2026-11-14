@@ -6,7 +6,7 @@ const read = (p) => fs.readFileSync(p, 'utf8');
 // Designs: parlor first, then the rest alphabetically. Each design has src/designs/<id>.js + src/layouts/<id>.js
 const ids = ['parlor', ...fs.readdirSync('src/designs').filter((f) => f.endsWith('.js')).map((f) => f.slice(0, -3)).filter((i) => i !== 'parlor').sort()]
   .filter((i) => fs.existsSync('src/layouts/' + i + '.js'));
-const JS_ORDER = ['src/util.js', ...ids.flatMap((i) => ['src/designs/' + i + '.js', 'src/layouts/' + i + '.js']), 'src/samples.js', 'src/board.js', 'src/api-demo.js', 'src/api-supabase.js', 'src/app.js'];
+const JS_ORDER = ['src/util.js', ...ids.flatMap((i) => ['src/designs/' + i + '.js', 'src/layouts/' + i + '.js']), 'src/samples.js', 'src/zip.js', 'src/board.js', 'src/api-demo.js', 'src/api-supabase.js', 'src/app.js'];
 // Each design is isolated: if one throws, the others (and the app) still load.
 const wrap = (p) => (p.startsWith('src/designs/') || p.startsWith('src/layouts/')
   ? `try {\n${read(p)}\n} catch (e) { console.error('Design file failed: ${p}', e); }`
@@ -38,7 +38,8 @@ ${head}<link rel="stylesheet" href="styles.css">
 `);
 
 fs.mkdirSync('preview', { recursive: true });
-fs.writeFileSync('preview/advent-your-year.html', `<title>Advent Your Year</title>
+fs.writeFileSync('preview/advent-your-year.html', `<meta charset="utf-8">
+<title>Advent Your Year</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 ${head}<style>
 ${css}</style>

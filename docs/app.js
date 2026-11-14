@@ -6922,6 +6922,58 @@ A.layouts["workshop"]=[{"day":1,"x":511,"y":876,"w":96,"h":86,"hinge":"top"},
   A.samples = { photo, notes: NOTES };
 })();
 
+/* ---- src/zip.js ---- */
+/* Tiny zip writer (stored entries, no compression: photos are already JPEG).
+   A.zip([{ name, data: Uint8Array | string }]) -> Blob */
+(function () {
+  const A = (window.AYY = window.AYY || {});
+  let table;
+  function crc32(buf) {
+    if (!table) {
+      table = new Uint32Array(256);
+      for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; table[n] = c >>> 0; }
+    }
+    let c = 0xffffffff;
+    for (let i = 0; i < buf.length; i++) c = table[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  }
+  function dosTime(d) {
+    return {
+      time: (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1),
+      date: ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate(),
+    };
+  }
+  A.zip = function (files) {
+    const enc = new TextEncoder();
+    const { time, date } = dosTime(new Date());
+    const parts = [], central = [];
+    let offset = 0;
+    for (const f of files) {
+      const name = enc.encode(f.name);
+      const data = typeof f.data === 'string' ? enc.encode(f.data) : f.data;
+      const crc = crc32(data);
+      const local = new DataView(new ArrayBuffer(30));
+      local.setUint32(0, 0x04034b50, true); local.setUint16(4, 20, true); local.setUint16(6, 0x0800, true); // utf-8 names
+      local.setUint16(8, 0, true); local.setUint16(10, time, true); local.setUint16(12, date, true);
+      local.setUint32(14, crc, true); local.setUint32(18, data.length, true); local.setUint32(22, data.length, true);
+      local.setUint16(26, name.length, true); local.setUint16(28, 0, true);
+      parts.push(local, name, data);
+      const cen = new DataView(new ArrayBuffer(46));
+      cen.setUint32(0, 0x02014b50, true); cen.setUint16(4, 20, true); cen.setUint16(6, 20, true); cen.setUint16(8, 0x0800, true);
+      cen.setUint16(10, 0, true); cen.setUint16(12, time, true); cen.setUint16(14, date, true);
+      cen.setUint32(16, crc, true); cen.setUint32(20, data.length, true); cen.setUint32(24, data.length, true);
+      cen.setUint16(28, name.length, true); cen.setUint32(42, offset, true);
+      central.push(cen, name);
+      offset += 30 + name.length + data.length;
+    }
+    const cenSize = central.reduce((s, p) => s + p.byteLength, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+    end.setUint32(12, cenSize, true); end.setUint32(16, offset, true);
+    return new Blob([...parts, ...central, end], { type: 'application/zip' });
+  };
+})();
+
 /* ---- src/board.js ---- */
 /* The advent calendar board: illustrated scene, animated effects, 24 opening doors,
    and the full-screen photo view that grows out of (and back into) each door. */
@@ -8295,12 +8347,14 @@ A.layouts["workshop"]=[{"day":1,"x":511,"y":876,"w":96,"h":86,"hinge":"top"},
         ? `${range}${c.to_name ? ` &middot; for ${esc(c.to_name)}` : ''}<br>${c.filled} of 24 doors filled &middot; ${c.shared ? `shared with ${c.shared} ${c.shared === 1 ? 'person' : 'people'}` : 'not shared yet'}`
         : `${range}${c.from_name ? ` &middot; from ${esc(c.from_name)}` : ''}<br>${c.opened} of 24 doors opened`;
       const actions = kind === 'mine'
-        ? `<a class="btn small" href="#edit-${c.id}">Edit doors</a><a class="btn ghost small" href="#preview-${c.id}">Preview</a><button class="btn ghost small" type="button" data-share="${c.id}">Share</button>`
-        : `<a class="btn small" href="#view-${c.id}">Open calendar</a>`;
+        ? `<a class="btn small" href="#edit-${c.id}">Edit doors</a><a class="btn ghost small" href="#preview-${c.id}">Preview</a><button class="btn ghost small" type="button" data-share="${c.id}">Share</button><button class="btn ghost small" type="button" data-download title="Save the photos and notes to your computer">Download</button>`
+        : `<a class="btn small" href="#view-${c.id}">Open calendar</a><button class="btn ghost small" type="button" data-download title="Save the photos and notes to your computer">Download</button>`;
       const node = el(`<article class="cal-card"><div class="cal-thumb"></div><div class="cal-body"><h3>${esc(c.title || 'Untitled calendar')}</h3><div class="cal-meta">${meta}</div><div class="meter" aria-hidden="true"><i style="width:${pct}%"></i></div><div class="cal-actions">${actions}</div></div></article>`);
       setThumb(node.querySelector('.cal-thumb'), c.design);
       const sb = node.querySelector('[data-share]');
       if (sb) sb.addEventListener('click', () => shareModal(c, (l) => { c.shared = l.length; }));
+      const dl = node.querySelector('[data-download]');
+      dl.addEventListener('click', () => downloadCalendar(c.id, dl));
       return node;
     };
     const recvEl = document.getElementById('recv'), mineEl = document.getElementById('mine');
@@ -8641,6 +8695,62 @@ A.layouts["workshop"]=[{"day":1,"x":511,"y":876,"w":96,"h":86,"hinge":"top"},
     const tr = m.querySelector('[data-act="try"]');
     if (tr) tr.addEventListener('click', () => { m.remove(); go('share-' + c.share_token); });
   }
+  /** Saves a calendar to the computer as a zip: every photo, a notes file, and an album page
+      that opens in any browser with no internet, so the memories don't depend on this website. */
+  async function downloadCalendar(id, btn) {
+    const label = btn && btn.textContent;
+    if (btn) { btn.disabled = true; btn.textContent = 'Preparing…'; }
+    try {
+      const { calendar: c, days } = await api.getCalendar(id);
+      const pad = (n) => String(n).padStart(2, '0');
+      const files = [], entries = [];
+      let missing = 0;
+      for (let d = 1; d <= 24; d++) {
+        const day = days[d];
+        if (!day) continue;
+        let photo = null;
+        if (day.image_url) {
+          try {
+            const r = await fetch(day.image_url);
+            if (!r.ok) throw new Error(r.status);
+            const blob = await r.blob();
+            photo = `photos/day-${pad(d)}.${/png/.test(blob.type) ? 'png' : 'jpg'}`;
+            files.push({ name: photo, data: new Uint8Array(await blob.arrayBuffer()) });
+          } catch (e) { missing++; }
+        }
+        if (photo || day.caption) entries.push({ d, photo, caption: day.caption || '', date: U.fmtDate(c.start_year, c.start_month, d, true) });
+        if (btn) btn.textContent = `Preparing… ${d}/24`;
+      }
+      const title = c.title || 'Advent calendar';
+      const byline = [c.to_name && 'For ' + c.to_name, c.from_name && 'from ' + c.from_name].filter(Boolean).join(' · ');
+      const notes = [title, byline, `${U.MONTHS[c.start_month - 1]} ${c.start_year}`, '']
+        .concat(entries.map((e) => `Day ${e.d} · ${e.date}${e.photo ? `  [${e.photo}]` : ''}\n${e.caption || '(no note)'}\n`)).filter((l, i) => l || i > 1).join('\n');
+      const album = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)}</title>
+<style>body{margin:0;background:#2a0f12;color:#2b1a10;font:17px/1.55 Georgia,serif}main{max-width:860px;margin:0 auto;padding:40px 18px}
+header{text-align:center;color:#f6eedc;margin-bottom:34px}h1{font-weight:normal;font-style:italic;font-size:44px;margin:0 0 6px}header p{margin:0;color:#d9b46c;letter-spacing:.06em}
+article{background:#f6eedc;border:1px solid #c4a86e;border-radius:6px;padding:22px;margin:0 0 22px;box-shadow:0 8px 24px rgba(0,0,0,.35)}
+.d{font:13px/1 Arial,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#9a7230;margin:0 0 4px}h2{font-weight:normal;color:#6d0f1d;margin:0 0 14px;font-size:24px}
+img{display:block;width:100%;height:auto;border-radius:3px;margin:0 0 14px}p.n{white-space:pre-wrap;margin:0}footer{text-align:center;color:#d9b46c;font-size:13px;padding:10px 0 30px}</style></head>
+<body><main><header><h1>${esc(title)}</h1><p>${esc(byline)}${byline ? ' · ' : ''}${U.MONTHS[c.start_month - 1]} ${c.start_year}</p></header>
+${entries.map((e) => `<article><p class="d">Day ${e.d} of 24</p><h2>${esc(e.date)}</h2>${e.photo ? `<img src="${e.photo}" alt="Day ${e.d}" loading="lazy">` : ''}${e.caption ? `<p class="n">${esc(e.caption)}</p>` : ''}</article>`).join('\n')}
+<footer>Saved from Advent Your Year on ${new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</footer></main></body></html>`;
+      files.unshift({ name: 'Open this album.html', data: album }, { name: 'notes.txt', data: notes });
+      const blob = A.zip(files);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${title.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') || 'advent-calendar'}-${c.start_year}.zip`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+      const shown = entries.length;
+      U.toast(missing ? `Saved, but ${missing} photo${missing === 1 ? '' : 's'} couldn’t be fetched. Try again later.`
+        : shown < 24 ? `Saved ${shown} day${shown === 1 ? '' : 's'}. Doors that haven’t opened or are empty aren’t included yet.` : 'Saved all 24 days to your computer.');
+    } catch (err) {
+      U.toast(err.message || 'The download couldn’t be prepared. Try again.', { kind: 'error' });
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = label; }
+    }
+  }
+
   function confirmModal(title, body, action, fn) {
     const { m, close } = modal(`<h2>${esc(title)}</h2><p>${esc(body)}</p><div class="modal-actions"><button class="btn ghost small" type="button" data-close style="color:#6d0f1d;border-color:#c4a86e">Keep it</button><button class="btn small" type="button" data-act="ok">${esc(action)}</button></div>`);
     m.querySelector('[data-act="ok"]').addEventListener('click', async (e) => { e.target.disabled = true; try { await fn(); close(); } catch (err) { U.toast(err.message, { kind: 'error' }); e.target.disabled = false; } });
@@ -8723,8 +8833,10 @@ A.layouts["workshop"]=[{"day":1,"x":511,"y":876,"w":96,"h":86,"hinge":"top"},
     let data;
     try { data = await api.getCalendar(id); } catch (err) { return viewError(err.message); }
     if (data.role !== 'owner') return go('view-' + id);
-    const extra = `<span class="pill berry">Preview · every door unlocked</span><button class="btn ghost small" type="button" id="open-all">Open every door</button><button class="btn ghost small" type="button" id="reset">Close all doors</button><a class="btn small" href="#edit-${id}">Edit doors</a>`;
+    const extra = `<span class="pill berry">Preview · every door unlocked</span><button class="btn ghost small" type="button" id="open-all">Open every door</button><button class="btn ghost small" type="button" id="reset">Close all doors</button><button class="btn ghost small" type="button" id="download">Download</button><a class="btn small" href="#edit-${id}">Edit doors</a>`;
     const b = calendarPage({ cal: data.calendar, days: data.days, opened: new Set(), mode: 'preview', back: 'edit-' + id, backLabel: 'Back to editing', extra });
+    const dl = document.getElementById('download');
+    dl.addEventListener('click', () => downloadCalendar(id, dl));
     document.getElementById('reset').addEventListener('click', () => b.setOpened(new Set()));
     document.getElementById('open-all').addEventListener('click', () => b.setOpened(new Set(Array.from({ length: 24 }, (_, i) => i + 1))));
   }
@@ -8733,7 +8845,10 @@ A.layouts["workshop"]=[{"day":1,"x":511,"y":876,"w":96,"h":86,"hinge":"top"},
     let data;
     try { data = await api.getCalendar(id); } catch (err) { return viewError(err.message); }
     if (data.role === 'owner') return go('preview-' + id);
-    calendarPage({ cal: data.calendar, days: data.days, opened: data.opened, mode: 'live', back: 'dashboard', backLabel: 'My calendars', onOpened: (d) => api.markOpened(id, d) });
+    const extra = `<button class="btn ghost small" type="button" id="download" title="Save the photos and notes to your computer">Download</button>`;
+    calendarPage({ cal: data.calendar, days: data.days, opened: data.opened, mode: 'live', back: 'dashboard', backLabel: 'My calendars', extra, onOpened: (d) => api.markOpened(id, d) });
+    const dl = document.getElementById('download');
+    dl.addEventListener('click', () => downloadCalendar(id, dl));
   }
 
   async function viewShare(token) {

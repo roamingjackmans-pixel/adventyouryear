@@ -1,0 +1,37 @@
+# Keeps the Supabase database from pausing in the quiet months between Christmases.
+# Free Supabase projects pause after about a week with no activity; this asks the database a
+# harmless question (looks up a share link that doesn't exist) twice a week.
+# If a run fails, GitHub emails you: open the Supabase dashboard and press Restore on the project.
+name: Keep the database awake
+
+on:
+  schedule:
+    - cron: '17 9 * * 1,4' # Mondays and Thursdays, 09:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ask the database a question
+        run: |
+          URL=$(grep -o "supabaseUrl: '[^']*'" docs/config.js | cut -d"'" -f2)
+          KEY=$(grep -o "supabaseAnonKey: '[^']*'" docs/config.js | cut -d"'" -f2)
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL/rest/v1/rpc/share_preview" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+            -d '{"p_token":"keepalive"}')
+          echo "Database answered with HTTP $code"
+          test "$code" = "200"
+
+      # GitHub switches off scheduled workflows in repos with no activity for 60 days.
+      # Re-enabling it each run keeps the schedule going without any commits.
+      - name: Keep this schedule switched on
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/keepalive.yml/enable"
